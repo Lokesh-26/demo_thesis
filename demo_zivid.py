@@ -11,18 +11,19 @@ from PIL import Image
 from utils import *
 import inflect
 sys.path.append('/media/gouda/3C448DDD448D99F2/segmentation/')
+sys.path.append('/media/gouda/3C448DDD448D99F2/segmentation/FoundationPose')
 # import the module from the dir
 from FoundationPose.estimater import *
-from image_agnostic_segmentation.scripts.DoUnseen.Dounseen import UnseenClassifier, UnseenSegment, draw_segmented_image
+from image_agnostic_segmentation.dounseen import UnseenClassifier, UnseenSegment, draw_segmented_image
 seg_path = '/media/gouda/3C448DDD448D99F2/segmentation/image_agnostic_segmentation/models/segmentation/segmentation_mask_rcnn.pth'
 cls_path = '/media/gouda/3C448DDD448D99F2/segmentation/image_agnostic_segmentation/models/classification/classification_vit_b_16_ctl.pth'
 image_scale = 1
 hope_dataset_gallery_path = '/media/gouda/3C448DDD448D99F2/segmentation/image_agnostic_segmentation/demo/objects_gallery'
 
 def main():
-    # initialize the unseen classifier
-    segmentor = UnseenSegment(seg_path)
-    zero_shot_classifier = UnseenClassifier(device='cuda', method='vit')
+    # initialize the DoUnseen
+    segmentor = UnseenSegment(method='maskrcnn', maskrcnn_model_path=seg_path)
+    zero_shot_classifier = UnseenClassifier(model_path=cls_path)
     # make cv2 windows full screen
     cv2.namedWindow('Demo', cv2.WINDOW_NORMAL)
     cv2.setWindowProperty('Demo', cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
@@ -51,7 +52,7 @@ def main():
 
     p = inflect.engine()  # to generate counting text: 1st, 2nd, 3rd, 4th, 5th, 6th
     # connect to the usb camera
-    cap = cv2.VideoCapture(1)  # 0 for laptop camera, 1 for usb camera
+    cap = cv2.VideoCapture(0)  # 0 for laptop camera, 1 for usb camera
     search_obj_gallery_images = []
     # capture 6 images
     for i in range(6):
@@ -84,14 +85,14 @@ def main():
     scorer = ScorePredictor()
     refiner = PoseRefinePredictor()
     glctx = dr.RasterizeCudaContext()
-    est = FoundationPose(scorer=scorer,
-                         refiner=refiner, debug=4, glctx=glctx)
+    # est = FoundationPose(model_pts=None, model_normals=None, scorer=scorer,
+    #                      refiner=refiner, debug=4, glctx=glctx, debug_dir='/media/gouda/3C448DDD448D99F2/segmentation/FoundationPose/debug')
     logging.info("estimator initialization done")
     first_frame = True
 
-    K = np.array([[1.778810058593750000e+03, 0.0, 9.679315795898438000e+02]
-                [0.0, 1.778870361328125000e+03, 5.724088134765625000e+02]
-                [0.0, 0.0, 1.0]])
+    K = np.array([[1.778810058593750000e+03, 0.0, 9.679315795898438000e+02],
+                  [0.0, 1.778870361328125000e+03, 5.724088134765625000e+02],
+                  [0.0, 0.0, 1.0]])
     while True:
         frame = camera.capture(settings)
         rgb_img = frame.point_cloud().copy_data('rgba')
