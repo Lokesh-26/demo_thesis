@@ -1,3 +1,4 @@
+import trimesh
 import zivid
 import cv2
 import numpy as np
@@ -14,16 +15,16 @@ sys.path.append('/media/gouda/3C448DDD448D99F2/segmentation/')
 sys.path.append('/media/gouda/3C448DDD448D99F2/segmentation/FoundationPose')
 # import the module from the dir
 from FoundationPose.estimater import *
-from image_agnostic_segmentation.dounseen import UnseenClassifier, UnseenSegment, draw_segmented_image
-seg_path = '/media/gouda/3C448DDD448D99F2/segmentation/image_agnostic_segmentation/models/segmentation/segmentation_mask_rcnn.pth'
-cls_path = '/media/gouda/3C448DDD448D99F2/segmentation/image_agnostic_segmentation/models/classification/classification_vit_b_16_ctl.pth'
+from image_agnostic_segmentation.dounseen import utils, core
+seg_path = '/media/gouda/3C448DDD448D99F2/segmentation/image_agnostic_segmentation/models/segmentation/sam_vit_b_01ec64.pth'
+cls_path = '/media/gouda/3C448DDD448D99F2/segmentation/image_agnostic_segmentation/models/classification/vit_b_16_epoch_199_augment.pth'
+k_path = '/media/gouda/3C448DDD448D99F2/datasets/br6d/cam_K.txt'
 image_scale = 1
 hope_dataset_gallery_path = '/media/gouda/3C448DDD448D99F2/segmentation/image_agnostic_segmentation/demo/objects_gallery'
-
+cadmodel_path = '/media/gouda/3C448DDD448D99F2/datasets/br6d/models/obj_000003.ply'
 def main():
-    # initialize the DoUnseen
-    segmentor = UnseenSegment(method='maskrcnn', maskrcnn_model_path=seg_path)
-    zero_shot_classifier = UnseenClassifier(model_path=cls_path)
+    # create segmentation model
+    segmentor = create_sam(seg_path, model_name='vit_b', device='cuda')
     # make cv2 windows full screen
     cv2.namedWindow('Demo', cv2.WINDOW_NORMAL)
     cv2.setWindowProperty('Demo', cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
@@ -82,17 +83,19 @@ def main():
     rgb_gallery = []
 
     # FoundationPose
+    mesh = trimesh.load(cadmodel_path)
+    mesh.apply_scale(0.001)
+    to_origin, extents = trimesh.bounds.oriented_bounds(mesh)
+    bbox = np.stack([-extents / 2, extents / 2], axis=0).reshape(2, 3)
     scorer = ScorePredictor()
     refiner = PoseRefinePredictor()
     glctx = dr.RasterizeCudaContext()
-    # est = FoundationPose(model_pts=None, model_normals=None, scorer=scorer,
-    #                      refiner=refiner, debug=4, glctx=glctx, debug_dir='/media/gouda/3C448DDD448D99F2/segmentation/FoundationPose/debug')
+    est = FoundationPose(model_pts=mesh.vertices, model_normals=mesh.vertex_normals, mesh=mesh, scorer=scorer,
+                         refiner=refiner, debug=0, glctx=glctx, debug_dir='/media/gouda/3C448DDD448D99F2/segmentation/FoundationPose/debug')
     logging.info("estimator initialization done")
     first_frame = True
 
-    K = np.array([[1.778810058593750000e+03, 0.0, 9.679315795898438000e+02],
-                  [0.0, 1.778870361328125000e+03, 5.724088134765625000e+02],
-                  [0.0, 0.0, 1.0]])
+    K = np.loadtxt(k_path).reshape(3, 3)
     while True:
         frame = camera.capture(settings)
         rgb_img = frame.point_cloud().copy_data('rgba')
@@ -110,8 +113,9 @@ def main():
             cv2.waitKey(100)
 
             # segmentation
-            seg_predictions = segmentor.segment_image(rgb_img)
-            seg_img = draw_segmented_image(rgb_img, seg_predictions)
+            sam_output = segmentor.generate(rgb_img)
+            sam_masks, sam_bboxes = reformat_sam_output(sam_output)
+            seg_img = utils.draw_segmented_image(rgb_img, sam_masks, sam_bboxes)
             # add text to the rgb image
             message = [('Segmentation of all objects is done', 100),
                        ('Click enter to search for your object', 200)]
@@ -146,13 +150,36 @@ def main():
             for img in search_obj_gallery_images:
                 gallery_dict[search_obj_name].append(Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB)))
 
-            zero_shot_classifier.update_gallery(gallery_dict)
-            class_predictions = zero_shot_classifier.find_object(rgb_img, seg_predictions, obj_name=search_obj_name)
-            classified_image = draw_segmented_image(rgb_img, class_predictions, classes=[search_obj_name])
-            # add text to the classified image
+            # create DoUnseen classifier
+            segments = utils.get_image_segments_from_binary_masks(rgb_img, sam_masks,
+                                                                           sam_bboxes)  # get image segments from rgb image
+            unseen_classifier = core.UnseenClassifier(
+                model_path=cls_path,
+                gallery_images=gallery_dict,
+                gallery_buffered_path=None,
+                augment_gallery=False,
+                batch_size=32,
+            )
+
+            # find one object
+            matched_query, score = unseen_classifier.find_object(segments, obj_name=search_obj_name, method="max")
+            matched_query_ann_image = utils.draw_segmented_image(rgb_img,
+                                                                          [sam_masks[matched_query]],
+                                                                          [sam_bboxes[matched_query]], classes_predictions=[0],
+                                                                          classes_names=["obj_000001"])
+            matched_query_ann_image = cv2.cvtColor(matched_query_ann_image, cv2.COLOR_RGB2BGR)
             message = [('Classification done', 100),
                        ('Click enter to exit', 200)]
             # visualize classified image
+            class_predictions, class_scores = unseen_classifier.classify_all_objects(segments,
+                                                                                     threshold=0.5)
+            filtered_class_predictions, filtered_masks, filtered_bboxes = utils.remove_unmatched_query_segments(
+                class_predictions, sam_masks, sam_bboxes)
+
+            classified_image = utils.draw_segmented_image(rgb_img, filtered_masks, filtered_bboxes,
+                                                                   filtered_class_predictions,
+                                                                   classes_names=None)
+            classified_image = cv2.cvtColor(classified_image, cv2.COLOR_RGB2BGR)
             classified_visualize = classified_image.copy()
             add_multiple_text(classified_visualize, message)
             cv2.imshow('Demo', cv2.resize(classified_visualize, (0, 0), fx=image_scale, fy=image_scale))
@@ -160,27 +187,25 @@ def main():
 
             cv2.destroyAllWindows()
 
-            mask = None
-            pose = est.register(K=K, rgb=rgb_img, depth=depth_img, ob_mask=mask, iteration=5)
+            scaled_rgb, scaled_depth, K = downscale_rgb_depth_intrinsics(rgb_img, depth_img, K, shorter_side=400)
+            mask = filtered_masks[0]
+            # TODO: check if the mask is correct
+            scaled_mask = process_mask(mask, scaled_rgb.shape[1], scaled_rgb.shape[0])
+            pose = est.register(K=K, rgb=scaled_rgb, depth=scaled_depth, ob_mask=scaled_mask, iteration=5)
             pose = pose[0]
             # xyz_map = depth2xyzmap(depth_img, K)
             # valid = depth_img >= 0.001
             # pcd = toOpen3dCloud(xyz_map[valid], color[valid])
             first_frame = False
         else:
-            pose = est.track_one(rgb=rgb_img, depth=depth_img, K=K, iteration=5)
-    center_pose = pose@np.linalg.inv(to_origin)
-    vis = draw_posed_3d_box(reader.K, img=color, ob_in_cam=center_pose, bbox=bbox)
-    vis = draw_xyz_axis(color, ob_in_cam=center_pose, scale=0.1, K=reader.K, thickness=3, transparency=0, is_input_rgb=True)
-    cv2.imshow('1', vis[...,::-1])
-    cv2.waitKey(1)
+            scaled_rgb, scaled_depth, K = downscale_rgb_depth_intrinsics(rgb_img, depth_img, K, shorter_side=400)
+            pose = est.track_one(rgb=scaled_rgb, depth=scaled_depth, K=K, iteration=5)
+        center_pose = pose@np.linalg.inv(to_origin)
+        vis = draw_posed_3d_box(K, img=rgb_img, ob_in_cam=center_pose, bbox=bbox)
+        vis = draw_xyz_axis(rgb_img, ob_in_cam=center_pose, scale=0.1, K=K, thickness=3, transparency=0, is_input_rgb=True)
+        cv2.imshow('1', vis[...,::-1])
+        cv2.waitKey(1)
 
-
-    # Display the final captured RGB and depth images
-    cv2.imshow('RGB Image', rgb_img)
-    cv2.imshow('Depth Image', depth_img)
-    cv2.waitKey(0)
-    cv2.destroyAllWindows()
 
 if __name__ == '__main__':
     main()
