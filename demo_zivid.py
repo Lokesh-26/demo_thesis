@@ -7,6 +7,7 @@ import logging
 import os
 import glob
 from PIL import Image
+import open3d as o3d
 
 
 from utils import *
@@ -19,6 +20,7 @@ from image_agnostic_segmentation.dounseen import utils, core
 seg_path = '/media/gouda/3C448DDD448D99F2/segmentation/image_agnostic_segmentation/models/segmentation/sam_vit_b_01ec64.pth'
 cls_path = '/media/gouda/3C448DDD448D99F2/segmentation/image_agnostic_segmentation/models/classification/vit_b_16_epoch_199_augment.pth'
 k_path = '/media/gouda/3C448DDD448D99F2/datasets/br6d/cam_K.txt'
+imgs_path = '/media/gouda/3C448DDD448D99F2/segmentation/demo_thesis/images'
 image_scale = 1
 hope_dataset_gallery_path = '/media/gouda/3C448DDD448D99F2/segmentation/image_agnostic_segmentation/demo/objects_gallery'
 cadmodel_path = '/media/gouda/3C448DDD448D99F2/datasets/br6d/models/obj_000003.ply'
@@ -41,40 +43,45 @@ def main():
 
     ## acquire query images from usb camera
     # show an example for the user how to capture query images
-    obj_000001_query_images = glob.glob(os.path.join(hope_dataset_gallery_path, 'obj_000001', '*.jpg'))  # 6 images
-    obj_000001_query_images = [cv2.imread(img) for img in obj_000001_query_images]
-    # stack image in a grid
-    message = [('Grab any object you have with you, You will capture few images of it', 100),
-               ('This is an example of how to capture query images', 200),
-               ('Click enter to start capturing', 300)]
-    search_obj_gallery_images = make_grid(obj_000001_query_images, message)
-    cv2.imshow('Demo', cv2.resize(search_obj_gallery_images, (0,0), fx=image_scale, fy=image_scale))
-    cv2.waitKey(0)
+    # obj_000001_query_images = glob.glob(os.path.join(hope_dataset_gallery_path, 'obj_000001', '*.jpg'))  # 6 images
+    # obj_000001_query_images = [cv2.imread(img) for img in obj_000001_query_images]
+    # # stack image in a grid
+    # message = [('Grab any object you have with you, You will capture few images of it', 100),
+    #            ('This is an example of how to capture query images', 200),
+    #            ('Click enter to start capturing', 300)]
+    # search_obj_gallery_images = make_grid(obj_000001_query_images, message)
+    # cv2.imshow('Demo', cv2.resize(search_obj_gallery_images, (0,0), fx=image_scale, fy=image_scale))
+    # cv2.waitKey(0)
 
     p = inflect.engine()  # to generate counting text: 1st, 2nd, 3rd, 4th, 5th, 6th
     # connect to the usb camera
     cap = cv2.VideoCapture(0)  # 0 for laptop camera, 1 for usb camera
     search_obj_gallery_images = []
+    # read the images from the imgs_path folder and append them to the search_obj_gallery_images
+    for img in os.listdir(imgs_path): # TODO delete this part and replace it with the camera capture
+        img = cv2.imread(os.path.join(imgs_path, img))
+        search_obj_gallery_images.append(img)
+
     # capture 6 images
-    for i in range(6):
-        while True:
-            ret, frame = cap.read()
-            # crop the image to 640x480 image to 512x512 around the center
-            frame = frame[80:560, 64:576]
-            # resize the image to 256x256
-            frame = cv2.resize(frame, (256, 256))
-            message = [
-                ('You need to capture 6 images of the object', 100),
-                ('Click enter to capture the {} image'.format(p.number_to_words(p.ordinal(i + 1))), 200)
-            ]
-            captured_query_images = make_grid(search_obj_gallery_images + [frame], message)
-            cv2.imshow('Demo', cv2.resize(captured_query_images, (0, 0), fx=image_scale, fy=image_scale))
-            key = cv2.waitKey(50)
-            # if enter is pressed, then add the captured image to the captured_query_image
-            if key == 13:
-                search_obj_gallery_images.append(frame)
-                break
-    cap.release()
+    # for i in range(6):
+    #     while True:
+    #         ret, frame = cap.read()
+    #         # crop the image to 640x480 image to 512x512 around the center
+    #         frame = frame[80:560, 64:576]
+    #         # resize the image to 256x256
+    #         frame = cv2.resize(frame, (256, 256))
+    #         message = [
+    #             ('You need to capture 6 images of the object', 100),
+    #             ('Click enter to capture the {} image'.format(p.number_to_words(p.ordinal(i + 1))), 200)
+    #         ]
+    #         captured_query_images = make_grid(search_obj_gallery_images + [frame], message)
+    #         cv2.imshow('Demo', cv2.resize(captured_query_images, (0, 0), fx=image_scale, fy=image_scale))
+    #         key = cv2.waitKey(50)
+    #         # if enter is pressed, then add the captured image to the captured_query_image
+    #         if key == 13:
+    #             search_obj_gallery_images.append(frame)
+    #             break
+    # cap.release()
 
     app = zivid.Application()
     camera = app.connect_camera()
@@ -97,13 +104,26 @@ def main():
 
     K = np.loadtxt(k_path).reshape(3, 3)
     while True:
+        # TODO capture from ROS node
         frame = camera.capture(settings)
         rgb_img = frame.point_cloud().copy_data('rgba')
         # remove alpha channel
         rgb_img = rgb_img[:,:,:3]
         # convert rgb to bgr
         rgb_img = cv2.cvtColor(rgb_img, cv2.COLOR_RGB2BGR)
-        depth_img = frame.point_cloud().copy_data('z')
+        depth_map = frame.point_cloud().copy_data("z")
+        depth_map_uint8 = (
+                    (depth_map - np.nanmin(depth_map)) / (np.nanmax(depth_map) - np.nanmin(depth_map)) * 255).astype(
+            np.uint8
+        )
+
+        # depth_map_color_map = cv2.applyColorMap(depth_map_uint8, cv2.COLORMAP_VIRIDIS)
+
+        # Setting nans to black
+        depth_map_uint8[np.isnan(depth_map)[:, :]] = 0
+        depth_img = depth_map_uint8
+        # # convert depth to mm
+        # depth_img = depth_map_color_map * 1000
         if first_frame:
             # add text to the rgb image
             message = [('Running segmentation', 100)]
@@ -185,24 +205,31 @@ def main():
             cv2.imshow('Demo', cv2.resize(classified_visualize, (0, 0), fx=image_scale, fy=image_scale))
             cv2.waitKey(0)
 
-            cv2.destroyAllWindows()
+            # cv2.destroyAllWindows()
 
             scaled_rgb, scaled_depth, K = downscale_rgb_depth_intrinsics(rgb_img, depth_img, K, shorter_side=400)
             mask = filtered_masks[0]
+            # save the mask to the disk
+            cv2.imwrite('mask.png', mask.astype(np.uint8) * 255)
             # TODO: check if the mask is correct
             scaled_mask = process_mask(mask, scaled_rgb.shape[1], scaled_rgb.shape[0])
+            scaled_mask = scaled_mask.astype(bool)
             pose = est.register(K=K, rgb=scaled_rgb, depth=scaled_depth, ob_mask=scaled_mask, iteration=5)
-            pose = pose[0]
-            # xyz_map = depth2xyzmap(depth_img, K)
-            # valid = depth_img >= 0.001
-            # pcd = toOpen3dCloud(xyz_map[valid], color[valid])
+            pose = pose
+            m = mesh.copy()
+            m.apply_transform(pose)
+            m.export('model_tf.obj')
+            xyz_map = depth2xyzmap(scaled_depth, K)
+            valid = scaled_depth >= 0.001
+            pcd = toOpen3dCloud(xyz_map[valid], scaled_rgb[valid])
+            o3d.io.write_point_cloud('scene_complete.ply', pcd)
             first_frame = False
         else:
             scaled_rgb, scaled_depth, K = downscale_rgb_depth_intrinsics(rgb_img, depth_img, K, shorter_side=400)
             pose = est.track_one(rgb=scaled_rgb, depth=scaled_depth, K=K, iteration=5)
         center_pose = pose@np.linalg.inv(to_origin)
-        vis = draw_posed_3d_box(K, img=rgb_img, ob_in_cam=center_pose, bbox=bbox)
-        vis = draw_xyz_axis(rgb_img, ob_in_cam=center_pose, scale=0.1, K=K, thickness=3, transparency=0, is_input_rgb=True)
+        vis = draw_posed_3d_box(K, img=scaled_rgb, ob_in_cam=center_pose, bbox=bbox)
+        vis = draw_xyz_axis(scaled_rgb, ob_in_cam=center_pose, scale=0.001, K=K, thickness=3, transparency=0, is_input_rgb=True)
         cv2.imshow('1', vis[...,::-1])
         cv2.waitKey(1)
 
