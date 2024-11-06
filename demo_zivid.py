@@ -9,7 +9,18 @@ import glob
 from PIL import Image
 import open3d as o3d
 
+import rospy
+import roslaunch
+import tf
+from cv_bridge import CvBridge, CvBridgeError
+from scipy.spatial.transform import Rotation as R
 
+from geometry_msgs.msg import PoseStamped
+from sensor_msgs.msg import PointCloud2
+from sensor_msgs.msg import Image as ImageMsg
+from geometry_msgs.msg import TransformStamped
+
+from zivid_camera.srv import *
 from utils import *
 import inflect
 sys.path.append('/media/gouda/3C448DDD448D99F2/segmentation/')
@@ -24,7 +35,68 @@ imgs_path = '/media/gouda/3C448DDD448D99F2/segmentation/demo_thesis/images'
 image_scale = 1
 hope_dataset_gallery_path = '/media/gouda/3C448DDD448D99F2/segmentation/image_agnostic_segmentation/demo/objects_gallery'
 cadmodel_path = '/media/gouda/3C448DDD448D99F2/datasets/br6d/models/obj_000003.ply'
+bridge = CvBridge()
+
+
+class ZividCamera:
+    def __init__(self, sample_dir=None, frame_count=0):
+        rospy.loginfo("Starting sample_capture_assistant.py")
+
+        self.sample_dir = sample_dir
+        self.frame_count = 0
+        self.rgb_img = None
+        self.depth_img = None
+
+        #ca_suggest_settings_service = "/zivid_camera/capture_assistant/suggest_settings"
+        #rospy.wait_for_service(ca_suggest_settings_service, 29.0)
+        #self.capture_assistant_service = rospy.ServiceProxy(
+        #    ca_suggest_settings_service, CaptureAssistantSuggestSettings
+        #)
+
+        self.capture_service = rospy.ServiceProxy("/zivid_camera/capture", Capture)
+
+        settings_path = "/media/gouda/3C448DDD448D99F2/segmentation/demo_thesis/consumer_goods_fast.yml"
+        self.load_settings_from_file_service = rospy.ServiceProxy(
+            "/zivid_camera/load_settings_from_file", LoadSettingsFromFile
+        )
+        self.load_settings_from_file_service(settings_path)
+
+        rospy.Subscriber("/zivid_camera/points/xyzrgba", PointCloud2, self.on_points)
+        rospy.Subscriber('/zivid_camera/color/image_color', ImageMsg, self.rgb_callback)
+        rospy.Subscriber('/zivid_camera/depth/image', ImageMsg, self.depth_callback)
+
+    def capture_assistant_suggest_settings(self):
+        max_capture_time = rospy.Duration.from_sec(10)
+        rospy.loginfo(
+            "Calling capture assistant service with max capture time = %.1f sec",
+            max_capture_time.to_sec(),
+        )
+        self.capture_assistant_service(
+            max_capture_time=max_capture_time,
+            ambient_light_frequency=CaptureAssistantSuggestSettingsRequest.AMBIENT_LIGHT_FREQUENCY_NONE,
+        )
+
+    def capture(self):
+        rospy.loginfo("Calling capture service")
+        self.capture_service()
+
+    def on_points(self, data):
+        rospy.loginfo("PointCloud received")
+
+    def rgb_callback(self, msg):
+        self.rgb_img = bridge.imgmsg_to_cv2(msg, "bgr8")
+        rospy.loginfo("RGB callback triggered and image updated")
+
+    def depth_callback(self, msg):
+        depth_img = bridge.imgmsg_to_cv2(msg, "passthrough")
+        depth_img = depth_img * 1000
+        self.depth_img = depth_img.astype('uint16')
+        rospy.loginfo("Depth callback triggered and image updated")
+
 def main():
+    rospy.init_node('data_collector', anonymous=True)
+    # setup zivid camera
+    zivid_cam = ZividCamera()
     # create segmentation model
     segmentor = create_sam(seg_path, model_name='vit_b', device='cuda')
     # make cv2 windows full screen
@@ -83,10 +155,10 @@ def main():
     #             break
     # cap.release()
 
-    app = zivid.Application()
-    camera = app.connect_camera()
-    settings = zivid.Settings(acquisitions=[zivid.Settings.Acquisition()])
-    settings.load('/media/gouda/3C448DDD448D99F2/segmentation/demo_thesis/consumer_goods_fast.yml')
+    # app = zivid.Application()
+    # camera = app.connect_camera()
+    # settings = zivid.Settings(acquisitions=[zivid.Settings.Acquisition()])
+    # settings.load('/media/gouda/3C448DDD448D99F2/segmentation/demo_thesis/consumer_goods_fast.yml')
     rgb_gallery = []
 
     # FoundationPose
@@ -104,26 +176,23 @@ def main():
 
     K = np.loadtxt(k_path).reshape(3, 3)
     while True:
-        # TODO capture from ROS node
-        frame = camera.capture(settings)
-        rgb_img = frame.point_cloud().copy_data('rgba')
-        # remove alpha channel
-        rgb_img = rgb_img[:,:,:3]
-        # convert rgb to bgr
-        rgb_img = cv2.cvtColor(rgb_img, cv2.COLOR_RGB2BGR)
-        depth_map = frame.point_cloud().copy_data("z")
-        depth_map_uint8 = (
-                    (depth_map - np.nanmin(depth_map)) / (np.nanmax(depth_map) - np.nanmin(depth_map)) * 255).astype(
-            np.uint8
-        )
+        # frame = camera.capture(settings)
+        zivid_cam.capture()
+        # Wait until depth_img is not None
+        start_time = rospy.Time.now()
+        while zivid_cam.depth_img is None:
+            if (rospy.Time.now() - start_time).to_sec() > 1.0:  # Timeout after 1 second
+                rospy.logwarn("Depth image not received within timeout")
+                break
+            rospy.sleep(0.05)  # Check every 50 milliseconds
 
-        # depth_map_color_map = cv2.applyColorMap(depth_map_uint8, cv2.COLORMAP_VIRIDIS)
-
-        # Setting nans to black
-        depth_map_uint8[np.isnan(depth_map)[:, :]] = 0
-        depth_img = depth_map_uint8
-        # # convert depth to mm
-        # depth_img = depth_map_color_map * 1000
+        if zivid_cam.depth_img is None:
+            rospy.logwarn("Skipping this iteration due to missing depth image")
+            continue
+        rgb_img = zivid_cam.rgb_img
+        depth_img = zivid_cam.depth_img
+        # to meters
+        scaled_rgb, scaled_depth, scaled_K = downscale_rgb_depth_intrinsics(rgb_img, depth_img, K, shorter_side=400)
         if first_frame:
             # add text to the rgb image
             message = [('Running segmentation', 100)]
@@ -236,3 +305,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+    rospy.spin()  # This keeps the node active to receive callbacks
