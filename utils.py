@@ -62,11 +62,11 @@ def add_multiple_text(img, message):
         
 def create_sam(sam_model_path, model_name='vit_b', device='cuda'):
     # use bfloat16 for the entire notebook
-    torch.autocast("cuda", dtype=torch.float16).__enter__()
+    # torch.autocast("cuda", dtype=torch.float16).__enter__()
     # turn on tfloat32 for Ampere GPUs (https://pytorch.org/docs/stable/notes/cuda.html#tensorfloat-32-tf32-on-ampere-devices)
-    if torch.cuda.get_device_properties(0).major >= 8:
-        torch.backends.cuda.matmul.allow_tf32 = True
-        torch.backends.cudnn.allow_tf32 = True
+    # if torch.cuda.get_device_properties(0).major >= 8:
+    #     torch.backends.cuda.matmul.allow_tf32 = True
+    #     torch.backends.cudnn.allow_tf32 = True
 
     sam = sam_model_registry[model_name](sam_model_path)
     sam.to(device)
@@ -122,8 +122,13 @@ def downscale_rgb_depth_intrinsics(rgb, depth, K, shorter_side=400):
     new_width = int(original_width * downscale_factor)
 
     # Downscale the RGB and depth images
-    downscaled_rgb = cv2.resize(rgb, (new_width, new_height), interpolation=cv2.INTER_LINEAR)
+    downscaled_rgb = cv2.resize(rgb, (new_width, new_height), interpolation=cv2.INTER_NEAREST)
     downscaled_depth = cv2.resize(depth, (new_width, new_height), interpolation=cv2.INTER_NEAREST)
+    # Convert depth values from millimeters to meters
+    downscaled_depth = downscaled_depth / 1e3
+
+    # Set depth values less than `min_depth` or greater than or equal to `inf` to 0 (invalid)
+    downscaled_depth[(downscaled_depth < 0.001) | (downscaled_depth >= np.inf)] = 0
 
     # Adjust the intrinsic matrix
     new_K = K.copy()
@@ -152,7 +157,11 @@ def process_mask(mask, new_width, new_height):
                 break
 
     # Resize and convert to binary mask
-    downscaled_mask = cv2.resize(mask, (new_width, new_height), interpolation=cv2.INTER_NEAREST)
+    # Convert to uint8 for resizing
+    mask = mask.astype(np.uint8) * 255
+
+    # Resize and convert back to binary mask
+    downscaled_mask = cv2.resize(mask, (new_width, new_height), interpolation=cv2.INTER_NEAREST).astype(bool).astype(np.uint8)
 
     # downscaled_mask = cv2.resize(mask, (new_width, new_height), interpolation=cv2.INTER_NEAREST).astype(bool).astype(
     #     np.uint8)

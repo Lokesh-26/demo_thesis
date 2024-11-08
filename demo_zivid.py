@@ -32,9 +32,9 @@ seg_path = '/media/gouda/3C448DDD448D99F2/segmentation/image_agnostic_segmentati
 cls_path = '/media/gouda/3C448DDD448D99F2/segmentation/image_agnostic_segmentation/models/classification/vit_b_16_epoch_199_augment.pth'
 k_path = '/media/gouda/3C448DDD448D99F2/datasets/br6d/cam_K.txt'
 imgs_path = '/media/gouda/3C448DDD448D99F2/segmentation/demo_thesis/images'
-image_scale = 1
+image_scale = 0.5
 hope_dataset_gallery_path = '/media/gouda/3C448DDD448D99F2/segmentation/image_agnostic_segmentation/demo/objects_gallery'
-cadmodel_path = '/media/gouda/3C448DDD448D99F2/datasets/br6d/models/obj_000003.ply'
+cadmodel_path = '/media/gouda/3C448DDD448D99F2/datasets/br6d/models/obj_000006.ply'
 bridge = CvBridge()
 
 
@@ -100,8 +100,8 @@ def main():
     # create segmentation model
     segmentor = create_sam(seg_path, model_name='vit_b', device='cuda')
     # make cv2 windows full screen
-    cv2.namedWindow('Demo', cv2.WINDOW_NORMAL)
-    cv2.setWindowProperty('Demo', cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+    # cv2.namedWindow('Demo', cv2.WINDOW_NORMAL)
+    # cv2.setWindowProperty('Demo', cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
 
     # show teaser image
     teaser_img = cv2.imread('teaser.png')  # image in the same directory as this script
@@ -129,9 +129,11 @@ def main():
     # connect to the usb camera
     cap = cv2.VideoCapture(0)  # 0 for laptop camera, 1 for usb camera
     search_obj_gallery_images = []
+    obj_folder = 'bier_crate'
     # read the images from the imgs_path folder and append them to the search_obj_gallery_images
-    for img in os.listdir(imgs_path): # TODO delete this part and replace it with the camera capture
-        img = cv2.imread(os.path.join(imgs_path, img))
+    for img in os.listdir(os.path.join(imgs_path, obj_folder)):
+        img_path = os.path.join(imgs_path, obj_folder, img)
+        img = cv2.imread(img_path)
         search_obj_gallery_images.append(img)
 
     # capture 6 images
@@ -193,6 +195,7 @@ def main():
         depth_img = zivid_cam.depth_img
         # to meters
         scaled_rgb, scaled_depth, scaled_K = downscale_rgb_depth_intrinsics(rgb_img, depth_img, K, shorter_side=400)
+        # float_rgb = scaled_rgb.astype(np.float64) / 255.0
         if first_frame:
             # add text to the rgb image
             message = [('Running segmentation', 100)]
@@ -238,10 +241,6 @@ def main():
             gallery_dict[search_obj_name] = []
             for img in search_obj_gallery_images:
                 gallery_dict[search_obj_name].append(Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB)))
-
-            # create DoUnseen classifier
-            segments = utils.get_image_segments_from_binary_masks(rgb_img, sam_masks,
-                                                                           sam_bboxes)  # get image segments from rgb image
             unseen_classifier = core.UnseenClassifier(
                 model_path=cls_path,
                 gallery_images=gallery_dict,
@@ -250,12 +249,16 @@ def main():
                 batch_size=32,
             )
 
+            # unseen_classifier.update_gallery(gallery_dict)
+            # create DoUnseen classifier
+            segments = utils.get_image_segments_from_binary_masks(rgb_img, sam_masks,
+                                                                           sam_bboxes)  # get image segments from rgb image
             # find one object
             matched_query, score = unseen_classifier.find_object(segments, obj_name=search_obj_name, method="max")
             matched_query_ann_image = utils.draw_segmented_image(rgb_img,
                                                                           [sam_masks[matched_query]],
                                                                           [sam_bboxes[matched_query]], classes_predictions=[0],
-                                                                          classes_names=["obj_000001"])
+                                                                          classes_names=["your_object"])
             matched_query_ann_image = cv2.cvtColor(matched_query_ann_image, cv2.COLOR_RGB2BGR)
             message = [('Classification done', 100),
                        ('Click enter to exit', 200)]
@@ -274,31 +277,26 @@ def main():
             cv2.imshow('Demo', cv2.resize(classified_visualize, (0, 0), fx=image_scale, fy=image_scale))
             cv2.waitKey(0)
 
-            # cv2.destroyAllWindows()
+            # # cv2.destroyAllWindows()
 
-            scaled_rgb, scaled_depth, K = downscale_rgb_depth_intrinsics(rgb_img, depth_img, K, shorter_side=400)
             mask = filtered_masks[0]
-            # save the mask to the disk
-            cv2.imwrite('mask.png', mask.astype(np.uint8) * 255)
-            # TODO: check if the mask is correct
             scaled_mask = process_mask(mask, scaled_rgb.shape[1], scaled_rgb.shape[0])
             scaled_mask = scaled_mask.astype(bool)
-            pose = est.register(K=K, rgb=scaled_rgb, depth=scaled_depth, ob_mask=scaled_mask, iteration=5)
-            pose = pose
+            # initialize the pose estimation
+            pose = est.register(K=scaled_K, rgb=scaled_rgb, depth=scaled_depth, ob_mask=scaled_mask, iteration=5)
             m = mesh.copy()
             m.apply_transform(pose)
             m.export('model_tf.obj')
-            xyz_map = depth2xyzmap(scaled_depth, K)
+            xyz_map = depth2xyzmap(scaled_depth, scaled_K)
             valid = scaled_depth >= 0.001
             pcd = toOpen3dCloud(xyz_map[valid], scaled_rgb[valid])
             o3d.io.write_point_cloud('scene_complete.ply', pcd)
             first_frame = False
         else:
-            scaled_rgb, scaled_depth, K = downscale_rgb_depth_intrinsics(rgb_img, depth_img, K, shorter_side=400)
-            pose = est.track_one(rgb=scaled_rgb, depth=scaled_depth, K=K, iteration=5)
+            pose = est.track_one(rgb=scaled_rgb, depth=scaled_depth, K=scaled_K, iteration=5)
         center_pose = pose@np.linalg.inv(to_origin)
-        vis = draw_posed_3d_box(K, img=scaled_rgb, ob_in_cam=center_pose, bbox=bbox)
-        vis = draw_xyz_axis(scaled_rgb, ob_in_cam=center_pose, scale=0.001, K=K, thickness=3, transparency=0, is_input_rgb=True)
+        vis = draw_posed_3d_box(scaled_K, img=scaled_rgb, ob_in_cam=center_pose, bbox=bbox)
+        vis = draw_xyz_axis(scaled_rgb, ob_in_cam=center_pose, scale=0.1, K=scaled_K, thickness=3, transparency=0, is_input_rgb=True)
         cv2.imshow('1', vis[...,::-1])
         cv2.waitKey(1)
 
