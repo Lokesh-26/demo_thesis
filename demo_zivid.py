@@ -129,39 +129,37 @@ def main():
     # connect to the usb camera
     cap = cv2.VideoCapture(0)  # 0 for laptop camera, 1 for usb camera
     search_obj_gallery_images = []
-    obj_folder = 'bier_crate'
     # read the images from the imgs_path folder and append them to the search_obj_gallery_images
-    for img in os.listdir(os.path.join(imgs_path, obj_folder)):
-        img_path = os.path.join(imgs_path, obj_folder, img)
-        img = cv2.imread(img_path)
-        search_obj_gallery_images.append(img)
+    # for img in os.listdir(os.path.join(imgs_path, obj_folder)):
+    #     img_path = os.path.join(imgs_path, obj_folder, img)
+    #     img = cv2.imread(img_path)
+    #     search_obj_gallery_images.append(img)
 
     # capture 6 images
-    # for i in range(6):
-    #     while True:
-    #         ret, frame = cap.read()
-    #         # crop the image to 640x480 image to 512x512 around the center
-    #         frame = frame[80:560, 64:576]
-    #         # resize the image to 256x256
-    #         frame = cv2.resize(frame, (256, 256))
-    #         message = [
-    #             ('You need to capture 6 images of the object', 100),
-    #             ('Click enter to capture the {} image'.format(p.number_to_words(p.ordinal(i + 1))), 200)
-    #         ]
-    #         captured_query_images = make_grid(search_obj_gallery_images + [frame], message)
-    #         cv2.imshow('Demo', cv2.resize(captured_query_images, (0, 0), fx=image_scale, fy=image_scale))
-    #         key = cv2.waitKey(50)
-    #         # if enter is pressed, then add the captured image to the captured_query_image
-    #         if key == 13:
-    #             search_obj_gallery_images.append(frame)
-    #             break
-    # cap.release()
+    for i in range(6):
+        while True:
+            ret, frame = cap.read()
+            # crop the image to 640x480 image to 512x512 around the center
+            frame = frame[80:560, 64:576]
+            # resize the image to 256x256
+            frame = cv2.resize(frame, (256, 256))
+            message = [
+                ('You need to capture 6 images of the object', 100),
+                ('Click enter to capture the {} image'.format(p.number_to_words(p.ordinal(i + 1))), 200)
+            ]
+            captured_query_images = make_grid(search_obj_gallery_images + [frame], message)
+            cv2.imshow('Demo', cv2.resize(captured_query_images, (0, 0), fx=image_scale, fy=image_scale))
+            key = cv2.waitKey(50)
+            # if enter is pressed, then add the captured image to the captured_query_image
+            if key == 13:
+                search_obj_gallery_images.append(frame)
+                break
+    cap.release()
 
     # app = zivid.Application()
     # camera = app.connect_camera()
     # settings = zivid.Settings(acquisitions=[zivid.Settings.Acquisition()])
     # settings.load('/media/gouda/3C448DDD448D99F2/segmentation/demo_thesis/consumer_goods_fast.yml')
-    rgb_gallery = []
 
     # FoundationPose
     mesh = trimesh.load(cadmodel_path)
@@ -261,7 +259,7 @@ def main():
                                                                           classes_names=["your_object"])
             matched_query_ann_image = cv2.cvtColor(matched_query_ann_image, cv2.COLOR_RGB2BGR)
             message = [('Classification done', 100),
-                       ('Click enter to exit', 200)]
+                       ('Click enter to track the object', 200)]
             # visualize classified image
             class_predictions, class_scores = unseen_classifier.classify_all_objects(segments,
                                                                                      threshold=0.5)
@@ -297,7 +295,7 @@ def main():
         center_pose = pose@np.linalg.inv(to_origin)
         vis = draw_posed_3d_box(scaled_K, img=scaled_rgb, ob_in_cam=center_pose, bbox=bbox)
         vis = draw_xyz_axis(scaled_rgb, ob_in_cam=center_pose, scale=0.1, K=scaled_K, thickness=3, transparency=0, is_input_rgb=True)
-        cv2.imshow('1', vis[...,::-1])
+        cv2.imshow('Demo', vis[...,::-1])
         cv2.waitKey(1)
 
 

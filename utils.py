@@ -49,6 +49,29 @@ def make_grid(captured_images, message):
     return grid
 
 def add_multiple_text(img, message):
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    font_scale = 1.2
+    font_thickness = 3
+    line_spacing = 10  # Space between lines
+
+    # Start `text_y` from the top with padding
+    text_y = 50
+
+    for line, y_offset in message:
+        text_size = cv2.getTextSize(line, font, font_scale, font_thickness)
+        text_w, text_h = text_size[0]
+
+        # Center the text horizontally
+        text_x = int((img.shape[1] - text_w) / 2)
+
+        # Draw the text on the image
+        cv2.putText(img, line, (text_x, text_y), font, font_scale, (256, 175, 0), font_thickness, cv2.LINE_AA)
+
+        # Move `text_y` down for the next line, including line height and spacing
+        text_y += text_h + line_spacing
+
+
+def add_multiple_text_tmp(img, message):
     for line, y in message:
         font = cv2.FONT_HERSHEY_SIMPLEX
         font_scale = 2
