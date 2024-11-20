@@ -34,7 +34,8 @@ k_path = '/media/gouda/3C448DDD448D99F2/datasets/br6d/cam_K.txt'
 imgs_path = '/media/gouda/3C448DDD448D99F2/segmentation/demo_thesis/images'
 image_scale = 0.5
 hope_dataset_gallery_path = '/media/gouda/3C448DDD448D99F2/segmentation/image_agnostic_segmentation/demo/objects_gallery'
-cadmodel_path = '/media/gouda/3C448DDD448D99F2/datasets/br6d/models/obj_000006.ply'
+cadmodel_path = '/media/gouda/3C448DDD448D99F2/datasets/br6d/models/obj_000003.ply'
+obj_folder = 'big_klt'
 bridge = CvBridge()
 
 
@@ -100,66 +101,66 @@ def main():
     # create segmentation model
     segmentor = create_sam(seg_path, model_name='vit_b', device='cuda')
     # make cv2 windows full screen
-    # cv2.namedWindow('Demo', cv2.WINDOW_NORMAL)
-    # cv2.setWindowProperty('Demo', cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+    cv2.namedWindow('Demo', cv2.WINDOW_NORMAL)
+    cv2.setWindowProperty('Demo', cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
 
     # show teaser image
-    teaser_img = cv2.imread('teaser.png')  # image in the same directory as this script
-    # add text to the teaser image
-    message = [('I can segment any new object from few images', 200),
-               ('Wanna play? click enter', 300)]
-    add_multiple_text(teaser_img, message)
-    # resize teaser image to half
-    cv2.imshow('Demo', cv2.resize(teaser_img, (0,0), fx=image_scale, fy=image_scale))
-    cv2.waitKey(0)
+    # read a mp4 video and show it as a teaser gif
+    teaser_video = cv2.VideoCapture('317561175-aa341004-5a15-4293-b3da-000471fd74ed.mp4')
+    message = [('I can track any object that I have not seen before', 200),
+               ('click enter', 300)]
 
-    ## acquire query images from usb camera
-    # show an example for the user how to capture query images
-    # obj_000001_query_images = glob.glob(os.path.join(hope_dataset_gallery_path, 'obj_000001', '*.jpg'))  # 6 images
-    # obj_000001_query_images = [cv2.imread(img) for img in obj_000001_query_images]
-    # # stack image in a grid
-    # message = [('Grab any object you have with you, You will capture few images of it', 100),
-    #            ('This is an example of how to capture query images', 200),
-    #            ('Click enter to start capturing', 300)]
-    # search_obj_gallery_images = make_grid(obj_000001_query_images, message)
-    # cv2.imshow('Demo', cv2.resize(search_obj_gallery_images, (0,0), fx=image_scale, fy=image_scale))
-    # cv2.waitKey(0)
+    while True:
+        # Read a frame from the video
+        ret, frame = teaser_video.read()
+
+        # If we've reached the end of the video, reset to the beginning
+        if not ret:
+            teaser_video.set(cv2.CAP_PROP_POS_FRAMES, 0)
+            continue
+
+        # Add text to the frame
+        add_multiple_text(frame, message)
+
+        # Resize and display the frame
+        cv2.imshow('Demo', frame)
+
+        # Wait briefly and check if 'Enter' key is pressed
+        key = cv2.waitKey(30)  # Adjust delay as needed for playback speed
+        if key == 13:  # Enter key
+            break
+    teaser_video.release()
 
     p = inflect.engine()  # to generate counting text: 1st, 2nd, 3rd, 4th, 5th, 6th
     # connect to the usb camera
-    cap = cv2.VideoCapture(0)  # 0 for laptop camera, 1 for usb camera
+    # cap = cv2.VideoCapture(0)  # 0 for laptop camera, 1 for usb camera
     search_obj_gallery_images = []
     # read the images from the imgs_path folder and append them to the search_obj_gallery_images
-    # for img in os.listdir(os.path.join(imgs_path, obj_folder)):
-    #     img_path = os.path.join(imgs_path, obj_folder, img)
-    #     img = cv2.imread(img_path)
-    #     search_obj_gallery_images.append(img)
+    for img in os.listdir(os.path.join(imgs_path, obj_folder)):
+        img_path = os.path.join(imgs_path, obj_folder, img)
+        img = cv2.imread(img_path)
+        search_obj_gallery_images.append(img)
 
     # capture 6 images
-    for i in range(6):
-        while True:
-            ret, frame = cap.read()
-            # crop the image to 640x480 image to 512x512 around the center
-            frame = frame[80:560, 64:576]
-            # resize the image to 256x256
-            frame = cv2.resize(frame, (256, 256))
-            message = [
-                ('You need to capture 6 images of the object', 100),
-                ('Click enter to capture the {} image'.format(p.number_to_words(p.ordinal(i + 1))), 200)
-            ]
-            captured_query_images = make_grid(search_obj_gallery_images + [frame], message)
-            cv2.imshow('Demo', cv2.resize(captured_query_images, (0, 0), fx=image_scale, fy=image_scale))
-            key = cv2.waitKey(50)
-            # if enter is pressed, then add the captured image to the captured_query_image
-            if key == 13:
-                search_obj_gallery_images.append(frame)
-                break
-    cap.release()
-
-    # app = zivid.Application()
-    # camera = app.connect_camera()
-    # settings = zivid.Settings(acquisitions=[zivid.Settings.Acquisition()])
-    # settings.load('/media/gouda/3C448DDD448D99F2/segmentation/demo_thesis/consumer_goods_fast.yml')
+    # for i in range(6):
+    #     while True:
+    #         ret, frame = cap.read()
+    #         # crop the image to 640x480 image to 512x512 around the center
+    #         frame = frame[80:560, 64:576]
+    #         # resize the image to 256x256
+    #         frame = cv2.resize(frame, (256, 256))
+    #         message = [
+    #             ('You need to capture 6 images of the object', 100),
+    #             ('Click enter to capture the {} image'.format(p.number_to_words(p.ordinal(i + 1))), 200)
+    #         ]
+    #         captured_query_images = make_grid(search_obj_gallery_images + [frame], message)
+    #         cv2.imshow('Demo', cv2.resize(captured_query_images, (0, 0), fx=image_scale, fy=image_scale))
+    #         key = cv2.waitKey(50)
+    #         # if enter is pressed, then add the captured image to the captured_query_image
+    #         if key == 13:
+    #             search_obj_gallery_images.append(frame)
+    #             break
+    # cap.release()
 
     # FoundationPose
     mesh = trimesh.load(cadmodel_path)
@@ -192,14 +193,15 @@ def main():
         rgb_img = zivid_cam.rgb_img
         depth_img = zivid_cam.depth_img
         # to meters
-        scaled_rgb, scaled_depth, scaled_K = downscale_rgb_depth_intrinsics(rgb_img, depth_img, K, shorter_side=400)
+        scaled_rgb, scaled_depth, scaled_K = downscale_rgb_depth_intrinsics(rgb_img, depth_img, K, shorter_side=600)
         # float_rgb = scaled_rgb.astype(np.float64) / 255.0
         if first_frame:
             # add text to the rgb image
             message = [('Running segmentation', 100)]
             rgb_visualize = rgb_img.copy()
             add_multiple_text(rgb_visualize, message)
-            cv2.imshow('Demo', cv2.resize(rgb_visualize, (0, 0), fx=image_scale, fy=image_scale))
+            # cv2.imshow('Demo', cv2.resize(rgb_visualize, (0, 0), fx=image_scale, fy=image_scale))
+            cv2.imshow('Demo', rgb_visualize)
             cv2.waitKey(100)
 
             # segmentation
@@ -211,48 +213,31 @@ def main():
                        ('Click enter to search for your object', 200)]
             seg_visualize = seg_img.copy()
             add_multiple_text(seg_visualize, message)
-            cv2.imshow('Demo', cv2.resize(seg_visualize, (0, 0), fx=image_scale, fy=image_scale))
+            cv2.imshow('Demo', seg_visualize)
             cv2.waitKey(0)
 
             # add text to the rgb image
             message = [('Running classification', 100)]
             seg_visualize = seg_img.copy()
             add_multiple_text(seg_visualize, message)
-            cv2.imshow('Demo', cv2.resize(seg_visualize, (0, 0), fx=image_scale, fy=image_scale))
+            cv2.imshow('Demo', seg_visualize)
             cv2.waitKey(100)
-            # classification
-            # load gallery images
-            gallery_images_path = '/media/gouda/3C448DDD448D99F2/segmentation/demo_thesis/gallery_real_resized_256'
-            # create dictionary of gallery images. Each item in the dictionary is a list of PIL images of the same object
-            # list object in gallery folder
-            gallery_objects = os.listdir(gallery_images_path)
-            gallery_dict = {}
-            for obj in gallery_objects:
-                gallery_dict[obj] = []
-                # list images in each object folder
-                obj_images = glob.glob(os.path.join(gallery_images_path, obj, '*.jpg'))
-                for img in obj_images:
-                    gallery_dict[obj].append(Image.open(img))
 
-            # append search object images to the gallery dictionary
-            search_obj_name = 'your_object'
-            gallery_dict[search_obj_name] = []
-            for img in search_obj_gallery_images:
-                gallery_dict[search_obj_name].append(Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB)))
+            # classification
             unseen_classifier = core.UnseenClassifier(
                 model_path=cls_path,
-                gallery_images=gallery_dict,
+                gallery_images=None,
                 gallery_buffered_path=None,
                 augment_gallery=False,
                 batch_size=32,
             )
 
-            # unseen_classifier.update_gallery(gallery_dict)
+            unseen_classifier.update_gallery(imgs_path)
             # create DoUnseen classifier
             segments = utils.get_image_segments_from_binary_masks(rgb_img, sam_masks,
                                                                            sam_bboxes)  # get image segments from rgb image
             # find one object
-            matched_query, score = unseen_classifier.find_object(segments, obj_name=search_obj_name, method="max")
+            matched_query, score = unseen_classifier.find_object(segments, obj_name=obj_folder, method="max")
             matched_query_ann_image = utils.draw_segmented_image(rgb_img,
                                                                           [sam_masks[matched_query]],
                                                                           [sam_bboxes[matched_query]], classes_predictions=[0],
@@ -269,10 +254,10 @@ def main():
             classified_image = utils.draw_segmented_image(rgb_img, filtered_masks, filtered_bboxes,
                                                                    filtered_class_predictions,
                                                                    classes_names=None)
-            classified_image = cv2.cvtColor(classified_image, cv2.COLOR_RGB2BGR)
+            # classified_image = cv2.cvtColor(classified_image, cv2.COLOR_RGB2BGR)
             classified_visualize = classified_image.copy()
             add_multiple_text(classified_visualize, message)
-            cv2.imshow('Demo', cv2.resize(classified_visualize, (0, 0), fx=image_scale, fy=image_scale))
+            cv2.imshow('Demo', classified_visualize)
             cv2.waitKey(0)
 
             # # cv2.destroyAllWindows()
@@ -293,6 +278,8 @@ def main():
         else:
             pose = est.track_one(rgb=scaled_rgb, depth=scaled_depth, K=scaled_K, iteration=5)
         center_pose = pose@np.linalg.inv(to_origin)
+        scaled_rgb = cv2.cvtColor(scaled_rgb, cv2.COLOR_BGR2RGB)
+        # scaled_rgb_visualize = scaled_rgb.copy()
         vis = draw_posed_3d_box(scaled_K, img=scaled_rgb, ob_in_cam=center_pose, bbox=bbox)
         vis = draw_xyz_axis(scaled_rgb, ob_in_cam=center_pose, scale=0.1, K=scaled_K, thickness=3, transparency=0, is_input_rgb=True)
         cv2.imshow('Demo', vis[...,::-1])
